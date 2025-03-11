@@ -3,10 +3,11 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import scipy.optimize as sco  # Pour l'optimisation de portefeuille
 from ta.momentum import RSIIndicator
 from ta.volatility import BollingerBands
 from ta.trend import SMAIndicator
-import scipy.optimize as sco  # Pour l'optimisation de portefeuille
 
 # 🎨 Configuration de l'application
 st.set_page_config(page_title="Analyse Boursière", layout="wide")
@@ -23,6 +24,29 @@ tickers = [ticker.strip().upper() for ticker in tickers_input.split(",")]
 df = yf.download(tickers, period="2y")
 st.sidebar.write("Données téléchargées avec succès !")
 
+# 📊 Statistiques Descriptives
+st.subheader("📊 Statistiques des Actions")
+
+stats_data = {}
+for ticker in tickers:
+    stock = yf.Ticker(ticker)
+    info = stock.info
+
+    stats_data[ticker] = {
+        "PER": info.get("trailingPE", np.nan),
+        "Rendement Cumulé (%)": (df["Close"][ticker].iloc[-1] / df["Close"][ticker].iloc[0] - 1) * 100,
+        "Plus Haut": df["High"][ticker].max(),
+        "Plus Bas": df["Low"][ticker].min(),
+        "Espérance Rendements (%)": df["Close"][ticker].pct_change().mean() * 252 * 100,
+        "Écart-Type (%)": df["Close"][ticker].pct_change().std() * np.sqrt(252) * 100,
+        "Volatilité (%)": df["Close"][ticker].pct_change().std() * np.sqrt(252) * 100,
+        "Beta": info.get("beta", np.nan),
+        "Capitalisation (B$)": info.get("marketCap", np.nan) / 1e9
+    }
+
+df_stats = pd.DataFrame(stats_data).T
+st.write(df_stats)
+
 # 📌 Ajout des indicateurs techniques
 for ticker in tickers:
     df[("SMA_50", ticker)] = df["Close"][ticker].rolling(window=50).mean()
@@ -34,55 +58,6 @@ for ticker in tickers:
 
     df[("RSI", ticker)] = RSIIndicator(df["Close"][ticker], window=14).rsi()
 
-# 📊 Affichage des graphiques
-for ticker in tickers:
-    st.subheader(f"📉 Graphique Bougies Japonaises - {ticker}")
-
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df["Open"][ticker],
-        high=df["High"][ticker],
-        low=df["Low"][ticker],
-        close=df["Close"][ticker],
-        name="Bougies Japonaises"
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df[("SMA_50", ticker)],
-        mode="lines", name="Moyenne Mobile 50j",
-        line=dict(color="blue", width=1.5)
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df[("SMA_200", ticker)],
-        mode="lines", name="Moyenne Mobile 200j",
-        line=dict(color="red", width=1.5)
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df[("Bollinger High", ticker)],
-        mode="lines", name="Bande Haute",
-        line=dict(color="purple", width=1, dash="dot")
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df[("Bollinger Low", ticker)],
-        mode="lines", name="Bande Basse",
-        line=dict(color="green", width=1, dash="dot")
-    ))
-
-    fig.update_layout(
-        title=f"Cours de {ticker} avec Moyennes Mobiles & Bandes de Bollinger",
-        xaxis_title="Date",
-        yaxis_title="Prix ($)",
-        xaxis_rangeslider_visible=False,
-        template="plotly_dark",
-        height=600
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
 # 📊 Calcul des Corrélations et Variance
 st.subheader("📈 Analyse de Corrélation et Risque")
 
@@ -93,17 +68,10 @@ correlation_matrix = returns.corr()
 st.write("### 📌 Matrice de Corrélation")
 st.write(correlation_matrix)
 
-# Calcul de la variance du portefeuille
-variance = np.var(returns, axis=0)
-volatility = np.sqrt(variance)
-
-st.write("### 📌 Volatilité des actions")
-st.write(pd.DataFrame(volatility, columns=["Volatilité"]).T)
-
 # 📌 Optimisation du Portefeuille avec Markowitz
 st.subheader("📊 Optimisation du Portefeuille")
 
-# Fonction d'objectif (minimiser la variance)
+# Fonction de minimisation du risque
 def portfolio_volatility(weights, cov_matrix):
     return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
 
@@ -132,7 +100,33 @@ optimal_weights = optimal.x
 portfolio_df = pd.DataFrame(optimal_weights, index=tickers, columns=["Allocation Optimale"])
 st.write(portfolio_df)
 
-# 📌 Score & Stratégie (Mise à jour avec les nouvelles métriques)
+# 📊 Tracé de la Frontière d’Efficience
+st.subheader("📉 Frontière d’Efficience du Portefeuille")
+
+num_portfolios = 5000
+results = np.zeros((3, num_portfolios))
+risk_free_rate = 0.02
+
+for i in range(num_portfolios):
+    weights = np.random.dirichlet(np.ones(num_assets), size=1).flatten()
+    portfolio_return = np.sum(returns.mean() * weights) * 252
+    portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+    sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
+
+    results[0, i] = portfolio_return
+    results[1, i] = portfolio_volatility
+    results[2, i] = sharpe_ratio
+
+fig, ax = plt.subplots(figsize=(8, 5))
+scatter = ax.scatter(results[1, :], results[0, :], c=results[2, :], cmap="coolwarm", marker="o", edgecolors="black")
+ax.set_xlabel("Risque (Volatilité)")
+ax.set_ylabel("Rendement Attendu")
+ax.set_title("Frontière d’Efficience")
+fig.colorbar(scatter, label="Ratio de Sharpe")
+
+st.pyplot(fig)
+
+# 📌 Score & Stratégie
 st.subheader("📊 Stratégie basée sur les indicateurs et l'optimisation")
 
 strategy = {}
@@ -146,13 +140,15 @@ for ticker in tickers:
 
     latest_score = score.iloc[-1] if not score.dropna().empty else 0
 
-    # Ajout de la volatilité et corrélation dans le scoring
-    risk_factor = volatility[ticker]
-    correlation_factor = correlation_matrix[ticker].mean()
+    # Ajout des statistiques au scoring
+    per = df_stats.loc[ticker, "PER"]
+    rendement_cumule = df_stats.loc[ticker, "Rendement Cumulé (%)"]
 
-    # Si volatilité trop haute et forte corrélation avec d'autres actifs, réduire le score
-    if risk_factor > volatility.mean() and correlation_factor > correlation_matrix.mean().mean():
-        latest_score -= 1
+    if per < df_stats["PER"].median():
+        latest_score += 1  # PER faible = potentiellement sous-évalué
+
+    if rendement_cumule > df_stats["Rendement Cumulé (%)"].median():
+        latest_score -= 1  # Déjà bien monté, possible correction
 
     if latest_score >= 2:
         strategy[ticker] = "🟢 Achat 📈"
