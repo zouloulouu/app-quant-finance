@@ -100,8 +100,8 @@ optimal_weights = optimal.x
 portfolio_df = pd.DataFrame(optimal_weights, index=tickers, columns=["Allocation Optimale"])
 st.write(portfolio_df)
 
-# 📊 Tracé de la Frontière d’Efficience
-st.subheader("📉 Frontière d’Efficience du Portefeuille")
+# 📊 Tracé de la Frontière d'Efficience
+st.subheader("📉 Frontière d'Efficience du Portefeuille")
 
 num_portfolios = 5000
 results = np.zeros((3, num_portfolios))
@@ -121,7 +121,7 @@ fig, ax = plt.subplots(figsize=(8, 5))
 scatter = ax.scatter(results[1, :], results[0, :], c=results[2, :], cmap="coolwarm", marker="o", edgecolors="black")
 ax.set_xlabel("Risque (Volatilité)")
 ax.set_ylabel("Rendement Attendu")
-ax.set_title("Frontière d’Efficience")
+ax.set_title("Frontière d'Efficience")
 fig.colorbar(scatter, label="Ratio de Sharpe")
 
 st.pyplot(fig)
